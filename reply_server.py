@@ -4793,6 +4793,36 @@ async def delete_risk_control_log(
         return {"success": False, "message": f"删除失败: {str(e)}"}
 
 
+@app.delete("/admin/risk-control-logs")
+async def clear_risk_control_logs(
+    cookie_id: str = None,
+    admin_user: Dict[str, Any] = Depends(require_admin)
+):
+    """清空风控日志（管理员专用）"""
+    try:
+        if cookie_id:
+            log_with_user('info', f"清空指定账号的风控日志: {cookie_id}", admin_user)
+        else:
+            log_with_user('info', "清空所有风控日志", admin_user)
+
+        # 清空风控日志
+        with db_manager.lock:
+            cursor = db_manager.conn.cursor()
+            if cookie_id:
+                cursor.execute('DELETE FROM risk_control_logs WHERE cookie_id = ?', (cookie_id,))
+            else:
+                cursor.execute('DELETE FROM risk_control_logs')
+            db_manager.conn.commit()
+            deleted_count = cursor.rowcount
+
+        log_with_user('info', f"风控日志清空成功，共删除 {deleted_count} 条记录", admin_user)
+        return {"success": True, "message": f"已清空 {deleted_count} 条日志"}
+
+    except Exception as e:
+        log_with_user('error', f"清空风控日志失败: {str(e)}", admin_user)
+        return {"success": False, "message": f"清空失败: {str(e)}"}
+
+
 @app.get("/logs/stats")
 async def get_log_stats(_: None = Depends(require_auth)):
     """获取日志统计信息"""
