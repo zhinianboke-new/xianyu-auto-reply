@@ -2737,6 +2737,230 @@ def clear_default_reply_records_compat(cid: str, current_user: Dict[str, Any] = 
     return clear_default_reply_records(cid, current_user)
 
 
+# ------------------------- 商品默认回复管理接口 -------------------------
+
+class ItemDefaultReplyIn(BaseModel):
+    """商品默认回复输入模型"""
+    reply_content: str = ''
+    reply_image_url: str = ''
+    enabled: bool = True
+    reply_once: bool = False
+
+
+class BatchItemDefaultReplyIn(BaseModel):
+    """批量商品默认回复输入模型"""
+    item_ids: List[str]
+    reply_content: str = ''
+    reply_image_url: str = ''
+    enabled: bool = True
+    reply_once: bool = False
+
+
+class BatchDeleteItemDefaultReplyIn(BaseModel):
+    """批量删除商品默认回复输入模型"""
+    item_ids: List[str]
+
+
+@app.get('/items/{cid}/{item_id}/default-reply')
+def get_item_default_reply(cid: str, item_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取商品默认回复设置"""
+    from db_manager import db_manager
+    try:
+        user_id = current_user['user_id']
+        user_cookies = db_manager.get_all_cookies(user_id)
+        
+        if cid not in user_cookies:
+            raise HTTPException(status_code=403, detail="无权限访问该Cookie")
+        
+        result = db_manager.get_item_default_reply(cid, item_id)
+        if result is None:
+            return {'success': True, 'data': None}
+        return {
+            'success': True,
+            'data': {
+                'item_id': item_id,
+                'reply_content': result.get('reply_content', ''),
+                'reply_image': result.get('reply_image_url', ''),
+                'enabled': result.get('enabled', False),
+                'reply_once': result.get('reply_once', False)
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put('/items/{cid}/{item_id}/default-reply')
+def save_item_default_reply(cid: str, item_id: str, reply_data: ItemDefaultReplyIn, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """保存商品默认回复设置"""
+    from db_manager import db_manager
+    try:
+        user_id = current_user['user_id']
+        user_cookies = db_manager.get_all_cookies(user_id)
+        
+        if cid not in user_cookies:
+            raise HTTPException(status_code=403, detail="无权限操作该Cookie")
+        
+        success = db_manager.save_item_default_reply(
+            cookie_id=cid,
+            item_id=item_id,
+            reply_content=reply_data.reply_content,
+            enabled=reply_data.enabled,
+            reply_once=reply_data.reply_once,
+            reply_image_url=reply_data.reply_image_url
+        )
+        
+        if success:
+            return {'success': True, 'message': '商品默认回复保存成功'}
+        else:
+            raise HTTPException(status_code=400, detail='保存失败')
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete('/items/{cid}/{item_id}/default-reply')
+def delete_item_default_reply(cid: str, item_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """删除商品默认回复设置"""
+    from db_manager import db_manager
+    try:
+        user_id = current_user['user_id']
+        user_cookies = db_manager.get_all_cookies(user_id)
+        
+        if cid not in user_cookies:
+            raise HTTPException(status_code=403, detail="无权限操作该Cookie")
+        
+        success = db_manager.delete_item_default_reply(cid, item_id)
+        if success:
+            return {'success': True, 'message': '商品默认回复删除成功'}
+        else:
+            return {'success': False, 'message': '未找到该商品的默认回复设置'}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post('/items/{cid}/batch-default-reply')
+def batch_save_item_default_reply(cid: str, reply_data: BatchItemDefaultReplyIn, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """批量保存商品默认回复设置"""
+    from db_manager import db_manager
+    try:
+        user_id = current_user['user_id']
+        user_cookies = db_manager.get_all_cookies(user_id)
+        
+        if cid not in user_cookies:
+            raise HTTPException(status_code=403, detail="无权限操作该Cookie")
+        
+        success_count = 0
+        fail_count = 0
+        
+        for item_id in reply_data.item_ids:
+            try:
+                success = db_manager.save_item_default_reply(
+                    cookie_id=cid,
+                    item_id=item_id,
+                    reply_content=reply_data.reply_content,
+                    enabled=reply_data.enabled,
+                    reply_once=reply_data.reply_once,
+                    reply_image_url=reply_data.reply_image_url
+                )
+                if success:
+                    success_count += 1
+                else:
+                    fail_count += 1
+            except Exception:
+                fail_count += 1
+        
+        return {
+            'success': True,
+            'message': f'批量保存完成，成功 {success_count} 个，失败 {fail_count} 个',
+            'success_count': success_count,
+            'fail_count': fail_count
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post('/items/{cid}/batch-delete-default-reply')
+def batch_delete_item_default_reply(cid: str, delete_data: BatchDeleteItemDefaultReplyIn, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """批量删除商品默认回复设置"""
+    from db_manager import db_manager
+    try:
+        user_id = current_user['user_id']
+        user_cookies = db_manager.get_all_cookies(user_id)
+        
+        if cid not in user_cookies:
+            raise HTTPException(status_code=403, detail="无权限操作该Cookie")
+        
+        success_count = 0
+        fail_count = 0
+        
+        for item_id in delete_data.item_ids:
+            try:
+                success = db_manager.delete_item_default_reply(cid, item_id)
+                if success:
+                    success_count += 1
+                else:
+                    fail_count += 1
+            except Exception:
+                fail_count += 1
+        
+        return {
+            'success': True,
+            'message': f'批量删除完成，成功 {success_count} 个，失败 {fail_count} 个',
+            'success_count': success_count,
+            'fail_count': fail_count
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post('/items/{cid}/{item_id}/default-reply/upload-image')
+async def upload_item_default_reply_image(cid: str, item_id: str, image: UploadFile = File(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """上传商品默认回复图片"""
+    from db_manager import db_manager
+    try:
+        user_id = current_user['user_id']
+        user_cookies = db_manager.get_all_cookies(user_id)
+        
+        if cid not in user_cookies:
+            raise HTTPException(status_code=403, detail="无权限操作该Cookie")
+        
+        # 检查文件类型
+        if not image.content_type or not image.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="只能上传图片文件")
+        
+        # 生成文件名
+        import uuid
+        ext = image.filename.split('.')[-1] if '.' in image.filename else 'png'
+        filename = f"{uuid.uuid4().hex}.{ext}"
+        
+        # 保存到 static/uploads/default_reply 目录
+        upload_dir = os.path.join('static', 'uploads', 'default_reply')
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        file_path = os.path.join(upload_dir, filename)
+        with open(file_path, 'wb') as f:
+            content = await image.read()
+            f.write(content)
+        
+        # 返回相对路径
+        image_url = f'/static/uploads/default_reply/{filename}'
+        
+        return {'success': True, 'image_url': image_url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ------------------------- 通知渠道管理接口 -------------------------
 
 @app.get('/notification-channels')
@@ -4176,9 +4400,41 @@ def delete_delivery_rule(rule_id: int, current_user: Dict[str, Any] = Depends(ge
 # ==================== 备份和恢复 API ====================
 
 @app.get("/backup/export")
-def export_backup(current_user: Dict[str, Any] = Depends(get_current_user)):
-    """导出用户备份"""
+def export_backup(
+    token: str = None,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+):
+    """导出用户备份
+    
+    支持两种认证方式：
+    1. Authorization Header (Bearer token)
+    2. URL 参数 (?token=xxx)
+    """
     try:
+        # 验证用户权限（支持 URL 参数和 Header 两种方式）
+        current_user = None
+        
+        # 优先使用 Header 中的 token
+        if credentials and credentials.credentials:
+            token_to_verify = credentials.credentials
+        elif token:
+            token_to_verify = token
+        else:
+            raise HTTPException(status_code=401, detail="未授权访问")
+        
+        # 验证 token
+        if token_to_verify not in SESSION_TOKENS:
+            raise HTTPException(status_code=401, detail="无效的token")
+        
+        token_data = SESSION_TOKENS[token_to_verify]
+        
+        # 检查 token 是否过期
+        if time.time() - token_data['timestamp'] > TOKEN_EXPIRE_TIME:
+            del SESSION_TOKENS[token_to_verify]
+            raise HTTPException(status_code=401, detail="token已过期")
+        
+        current_user = token_data
+        
         from db_manager import db_manager
         user_id = current_user['user_id']
         username = current_user['username']
@@ -4197,6 +4453,8 @@ def export_backup(current_user: Dict[str, Any] = Depends(get_current_user)):
         response.headers["Content-Type"] = "application/json"
 
         return response
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"导出备份失败: {str(e)}")
 
@@ -5521,13 +5779,49 @@ def get_item_reply(cookie_id: str, item_id: str, current_user: Dict[str, Any] = 
 # ------------------------- 数据库备份和恢复接口 -------------------------
 
 @app.get('/admin/backup/download')
-def download_database_backup(admin_user: Dict[str, Any] = Depends(require_admin)):
-    """下载数据库备份文件（管理员专用）"""
+def download_database_backup(
+    token: str = None,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+):
+    """下载数据库备份文件（管理员专用）
+    
+    支持两种认证方式：
+    1. Authorization Header (Bearer token)
+    2. URL 参数 (?token=xxx)
+    """
     import os
     from fastapi.responses import FileResponse
     from datetime import datetime
 
     try:
+        # 验证管理员权限（支持 URL 参数和 Header 两种方式）
+        admin_user = None
+        
+        # 优先使用 Header 中的 token
+        if credentials and credentials.credentials:
+            token_to_verify = credentials.credentials
+        elif token:
+            token_to_verify = token
+        else:
+            raise HTTPException(status_code=401, detail="未授权访问")
+        
+        # 验证 token
+        if token_to_verify not in SESSION_TOKENS:
+            raise HTTPException(status_code=401, detail="无效的token")
+        
+        token_data = SESSION_TOKENS[token_to_verify]
+        
+        # 检查 token 是否过期
+        if time.time() - token_data['timestamp'] > TOKEN_EXPIRE_TIME:
+            del SESSION_TOKENS[token_to_verify]
+            raise HTTPException(status_code=401, detail="token已过期")
+        
+        # 检查是否是管理员
+        if token_data['username'] != ADMIN_USERNAME:
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+        
+        admin_user = token_data
+
         log_with_user('info', "请求下载数据库备份", admin_user)
 
         # 使用db_manager的实际数据库路径

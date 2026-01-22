@@ -316,17 +316,20 @@ class DBManager:
             )
             ''')
 
-            # 创建默认回复表
+            # 创建默认回复表（支持账号级别和商品级别）
             cursor.execute('''
             CREATE TABLE IF NOT EXISTS default_replies (
-                cookie_id TEXT PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cookie_id TEXT NOT NULL,
+                item_id TEXT,
                 enabled BOOLEAN DEFAULT FALSE,
                 reply_content TEXT,
                 reply_image_url TEXT,
                 reply_once BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (cookie_id) REFERENCES cookies(id) ON DELETE CASCADE
+                FOREIGN KEY (cookie_id) REFERENCES cookies(id) ON DELETE CASCADE,
+                UNIQUE(cookie_id, item_id)
             )
             ''')
 
@@ -348,6 +351,15 @@ class DBManager:
                 if "duplicate column name" not in str(e).lower():
                     logger.warning(f"添加 reply_image_url 字段失败: {e}")
 
+            # 添加 item_id 字段（如果不存在，用于支持商品级别默认回复）
+            try:
+                cursor.execute('ALTER TABLE default_replies ADD COLUMN item_id TEXT')
+                self.conn.commit()
+                logger.info("已添加 item_id 字段到 default_replies 表")
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" not in str(e).lower():
+                    logger.warning(f"添加 item_id 字段失败: {e}")
+
             # 创建指定商品回复表
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS item_replay (
@@ -360,14 +372,15 @@ class DBManager:
                 )
             ''')
 
-            # 创建默认回复记录表（记录已回复的chat_id）
+            # 创建默认回复记录表（记录已回复的chat_id，支持账号级别和商品级别）
             cursor.execute('''
             CREATE TABLE IF NOT EXISTS default_reply_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 cookie_id TEXT NOT NULL,
                 chat_id TEXT NOT NULL,
+                item_id TEXT,
                 replied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(cookie_id, chat_id),
+                UNIQUE(cookie_id, chat_id, item_id),
                 FOREIGN KEY (cookie_id) REFERENCES cookies(id) ON DELETE CASCADE
             )
             ''')
@@ -1928,49 +1941,125 @@ class DBManager:
                 return {}
 
     # -------------------- 默认回复操作 --------------------
-    def save_default_reply(self, cookie_id: str, enabled: bool, reply_content: str = None, reply_once: bool = False, reply_image_url: str = None):
-        """保存默认回复设置"""
+    def save_default_reply(self, cookie_id: str, enabled: bool, reply_content: str = None, reply_once: bool = False, reply_image_url: str = None, item_id: str = None):
+        """保存默认回复设置（支持账号级别和商品级别）
+        
+        Args:
+            cookie_id: 账号ID
+            enabled: 是否启用
+            reply_content: 回复内容
+            reply_once: 是否只回复一次
+            reply_image_url: 回复图片URL
+            item_id: 商品ID，为None表示账号级别默认回复
+        """
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                cursor.execute('''
-                INSERT OR REPLACE INTO default_replies (cookie_id, enabled, reply_content, reply_image_url, reply_once, updated_at)
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ''', (cookie_id, enabled, reply_content, reply_image_url, reply_once))
+                # 先检查是否存在
+                if item_id:
+                    cursor.execute('SELECT id FROM default_replies WHERE cookie_id = ? AND item_id = ?', (cookie_id, item_id))
+                else:
+                    cursor.execute('SELECT id FROM default_replies WHERE cookie_id = ? AND item_id IS NULL', (cookie_id,))
+                
+                existing = cursor.fetchone()
+                
+                if existing:
+                    # 更新
+                    if item_id:
+                        cursor.execute('''
+                        UPDATE default_replies SET enabled = ?, reply_content = ?, reply_image_url = ?, reply_once = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE cookie_id = ? AND item_id = ?
+                        ''', (enabled, reply_content, reply_image_url, reply_once, cookie_id, item_id))
+                    else:
+                        cursor.execute('''
+                        UPDATE default_replies SET enabled = ?, reply_content = ?, reply_image_url = ?, reply_once = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE cookie_id = ? AND item_id IS NULL
+                        ''', (enabled, reply_content, reply_image_url, reply_once, cookie_id))
+                else:
+                    # 插入
+                    cursor.execute('''
+                    INSERT INTO default_replies (cookie_id, item_id, enabled, reply_content, reply_image_url, reply_once)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (cookie_id, item_id, enabled, reply_content, reply_image_url, reply_once))
+                
                 self.conn.commit()
-                logger.debug(f"保存默认回复设置: {cookie_id} -> {'启用' if enabled else '禁用'}, 只回复一次: {'是' if reply_once else '否'}, 图片: {reply_image_url}")
+                item_desc = f"商品{item_id}" if item_id else "账号级别"
+                logger.debug(f"保存默认回复设置: {cookie_id} ({item_desc}) -> {'启用' if enabled else '禁用'}, 只回复一次: {'是' if reply_once else '否'}")
             except Exception as e:
                 logger.error(f"保存默认回复设置失败: {e}")
                 raise
 
-    def get_default_reply(self, cookie_id: str) -> Optional[Dict[str, any]]:
-        """获取指定账号的默认回复设置"""
+    def get_default_reply(self, cookie_id: str, item_id: str = None) -> Optional[Dict[str, any]]:
+        """获取指定账号的默认回复设置（支持账号级别和商品级别）
+        
+        Args:
+            cookie_id: 账号ID
+            item_id: 商品ID，为None表示获取账号级别默认回复
+        """
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                cursor.execute('''
-                SELECT enabled, reply_content, reply_once, reply_image_url FROM default_replies WHERE cookie_id = ?
-                ''', (cookie_id,))
+                if item_id:
+                    cursor.execute('''
+                    SELECT enabled, reply_content, reply_once, reply_image_url, item_id FROM default_replies 
+                    WHERE cookie_id = ? AND item_id = ?
+                    ''', (cookie_id, item_id))
+                else:
+                    cursor.execute('''
+                    SELECT enabled, reply_content, reply_once, reply_image_url, item_id FROM default_replies 
+                    WHERE cookie_id = ? AND item_id IS NULL
+                    ''', (cookie_id,))
                 result = cursor.fetchone()
                 if result:
-                    enabled, reply_content, reply_once, reply_image_url = result
+                    enabled, reply_content, reply_once, reply_image_url, item_id_val = result
                     return {
                         'enabled': bool(enabled),
                         'reply_content': reply_content or '',
                         'reply_once': bool(reply_once) if reply_once is not None else False,
-                        'reply_image_url': reply_image_url or ''
+                        'reply_image_url': reply_image_url or '',
+                        'item_id': item_id_val
                     }
                 return None
             except Exception as e:
                 logger.error(f"获取默认回复设置失败: {e}")
                 return None
 
-    def get_all_default_replies(self) -> Dict[str, Dict[str, any]]:
-        """获取所有账号的默认回复设置"""
+    def get_item_default_reply(self, cookie_id: str, item_id: str) -> Optional[Dict[str, any]]:
+        """获取商品级别的默认回复设置"""
+        if not item_id:
+            return None
+        return self.get_default_reply(cookie_id, item_id)
+
+    def save_item_default_reply(self, cookie_id: str, item_id: str, reply_content: str, enabled: bool = True, reply_once: bool = False, reply_image_url: str = None) -> bool:
+        """保存商品级别的默认回复设置"""
+        try:
+            logger.info(f"保存商品默认回复: cookie_id={cookie_id}, item_id={item_id}, enabled={enabled}, reply_content={reply_content[:50] if reply_content else ''}")
+            self.save_default_reply(cookie_id, enabled, reply_content, reply_once, reply_image_url, item_id)
+            logger.info(f"商品默认回复保存成功: cookie_id={cookie_id}, item_id={item_id}")
+            return True
+        except Exception as e:
+            logger.error(f"保存商品默认回复失败: {e}")
+            return False
+
+    def delete_item_default_reply(self, cookie_id: str, item_id: str) -> bool:
+        """删除商品级别的默认回复设置"""
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                cursor.execute('SELECT cookie_id, enabled, reply_content, reply_once, reply_image_url FROM default_replies')
+                cursor.execute('DELETE FROM default_replies WHERE cookie_id = ? AND item_id = ?', (cookie_id, item_id))
+                self.conn.commit()
+                logger.debug(f"删除商品默认回复设置: {cookie_id} -> {item_id}")
+                return cursor.rowcount > 0
+            except Exception as e:
+                logger.error(f"删除商品默认回复设置失败: {e}")
+                return False
+
+    def get_all_default_replies(self) -> Dict[str, Dict[str, any]]:
+        """获取所有账号的默认回复设置（仅账号级别，item_id为空）"""
+        with self.lock:
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute('SELECT cookie_id, enabled, reply_content, reply_once, reply_image_url FROM default_replies WHERE item_id IS NULL')
 
                 result = {}
                 for row in cursor.fetchall():
@@ -1987,42 +2076,52 @@ class DBManager:
                 logger.error(f"获取所有默认回复设置失败: {e}")
                 return {}
 
-    def add_default_reply_record(self, cookie_id: str, chat_id: str):
-        """记录已回复的chat_id"""
+    def add_default_reply_record(self, cookie_id: str, chat_id: str, item_id: str = None):
+        """记录已回复的chat_id（支持账号级别和商品级别）"""
         with self.lock:
             try:
                 cursor = self.conn.cursor()
                 cursor.execute('''
-                INSERT OR IGNORE INTO default_reply_records (cookie_id, chat_id)
-                VALUES (?, ?)
-                ''', (cookie_id, chat_id))
+                INSERT OR IGNORE INTO default_reply_records (cookie_id, chat_id, item_id)
+                VALUES (?, ?, ?)
+                ''', (cookie_id, chat_id, item_id))
                 self.conn.commit()
-                logger.debug(f"记录默认回复: {cookie_id} -> {chat_id}")
+                item_desc = f"商品{item_id}" if item_id else "账号级别"
+                logger.debug(f"记录默认回复: {cookie_id} -> {chat_id} ({item_desc})")
             except Exception as e:
                 logger.error(f"记录默认回复失败: {e}")
 
-    def has_default_reply_record(self, cookie_id: str, chat_id: str) -> bool:
-        """检查是否已经回复过该chat_id"""
+    def has_default_reply_record(self, cookie_id: str, chat_id: str, item_id: str = None) -> bool:
+        """检查是否已经回复过该chat_id（支持账号级别和商品级别）"""
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                cursor.execute('''
-                SELECT 1 FROM default_reply_records WHERE cookie_id = ? AND chat_id = ?
-                ''', (cookie_id, chat_id))
+                if item_id:
+                    cursor.execute('''
+                    SELECT 1 FROM default_reply_records WHERE cookie_id = ? AND chat_id = ? AND item_id = ?
+                    ''', (cookie_id, chat_id, item_id))
+                else:
+                    cursor.execute('''
+                    SELECT 1 FROM default_reply_records WHERE cookie_id = ? AND chat_id = ? AND item_id IS NULL
+                    ''', (cookie_id, chat_id))
                 result = cursor.fetchone()
                 return result is not None
             except Exception as e:
                 logger.error(f"检查默认回复记录失败: {e}")
                 return False
 
-    def clear_default_reply_records(self, cookie_id: str):
-        """清空指定账号的默认回复记录"""
+    def clear_default_reply_records(self, cookie_id: str, item_id: str = None):
+        """清空指定账号的默认回复记录（支持账号级别和商品级别）"""
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                cursor.execute('DELETE FROM default_reply_records WHERE cookie_id = ?', (cookie_id,))
+                if item_id:
+                    cursor.execute('DELETE FROM default_reply_records WHERE cookie_id = ? AND item_id = ?', (cookie_id, item_id))
+                else:
+                    cursor.execute('DELETE FROM default_reply_records WHERE cookie_id = ? AND item_id IS NULL', (cookie_id,))
                 self.conn.commit()
-                logger.debug(f"清空默认回复记录: {cookie_id}")
+                item_desc = f"商品{item_id}" if item_id else "账号级别"
+                logger.debug(f"清空默认回复记录: {cookie_id} ({item_desc})")
             except Exception as e:
                 logger.error(f"清空默认回复记录失败: {e}")
 
@@ -2031,7 +2130,7 @@ class DBManager:
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                self._execute_sql(cursor, "DELETE FROM default_replies WHERE cookie_id = ?", (cookie_id,))
+                self._execute_sql(cursor, "DELETE FROM default_replies WHERE cookie_id = ? AND item_id IS NULL", (cookie_id,))
                 self.conn.commit()
                 logger.debug(f"删除默认回复设置: {cookie_id}")
                 return True
@@ -2040,16 +2139,22 @@ class DBManager:
                 self.conn.rollback()
                 return False
 
-    def update_default_reply_image_url(self, cookie_id: str, new_image_url: str) -> bool:
-        """更新默认回复的图片URL（用于将本地图片URL更新为CDN URL）"""
+    def update_default_reply_image_url(self, cookie_id: str, new_image_url: str, item_id: str = None) -> bool:
+        """更新默认回复的图片URL（用于将本地图片URL更新为CDN URL，支持账号级别和商品级别）"""
         with self.lock:
             try:
                 cursor = self.conn.cursor()
-                cursor.execute('''
-                UPDATE default_replies SET reply_image_url = ? WHERE cookie_id = ?
-                ''', (new_image_url, cookie_id))
+                if item_id:
+                    cursor.execute('''
+                    UPDATE default_replies SET reply_image_url = ? WHERE cookie_id = ? AND item_id = ?
+                    ''', (new_image_url, cookie_id, item_id))
+                else:
+                    cursor.execute('''
+                    UPDATE default_replies SET reply_image_url = ? WHERE cookie_id = ? AND item_id IS NULL
+                    ''', (new_image_url, cookie_id))
                 self.conn.commit()
-                logger.debug(f"更新默认回复图片URL: {cookie_id} -> {new_image_url}")
+                item_desc = f"商品{item_id}" if item_id else "账号级别"
+                logger.debug(f"更新默认回复图片URL: {cookie_id} ({item_desc}) -> {new_image_url}")
                 return True
             except Exception as e:
                 logger.error(f"更新默认回复图片URL失败: {e}")

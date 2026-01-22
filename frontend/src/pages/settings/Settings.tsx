@@ -176,7 +176,13 @@ export function Settings() {
   // 下载数据库备份（管理员）
   const handleDownloadBackup = () => {
     const url = downloadDatabaseBackup()
-    window.open(url, '_blank')
+    // 使用 a 标签下载，避免被弹窗拦截器阻止
+    const link = document.createElement('a')
+    link.href = url
+    link.download = ''
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
   }
 
   // 上传数据库备份（管理员）
@@ -227,7 +233,13 @@ export function Settings() {
   // 导出用户备份
   const handleExportUserBackup = () => {
     const url = exportUserBackup()
-    window.open(url, '_blank')
+    // 使用 a 标签下载，避免被弹窗拦截器阻止
+    const link = document.createElement('a')
+    link.href = url
+    link.download = ''
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
   }
 
   // 导入用户备份

@@ -120,7 +120,9 @@ export const downloadDatabaseBackup = (): string => {
 export const uploadDatabaseBackup = async (file: File): Promise<ApiResponse> => {
   const formData = new FormData()
   formData.append('backup_file', file)
-  return post('/admin/backup/upload', formData)
+  return post('/admin/backup/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
 }
 
 // 刷新系统缓存
@@ -138,7 +140,9 @@ export const exportUserBackup = (): string => {
 export const importUserBackup = async (file: File): Promise<ApiResponse> => {
   const formData = new FormData()
   formData.append('file', file)
-  return post('/backup/import', formData)
+  return post('/backup/import', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
 }
 
 // ========== 用户设置 ==========

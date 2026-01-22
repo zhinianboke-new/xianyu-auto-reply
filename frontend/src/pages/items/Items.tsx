@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
-import { CheckSquare, Download, Edit2, ExternalLink, Loader2, Package, RefreshCw, Search, Square, Trash2, X } from 'lucide-react'
-import { batchDeleteItems, deleteItem, fetchAllItemsFromAccount, getItems, updateItem, updateItemMultiQuantityDelivery, updateItemMultiSpec } from '@/api/items'
+import { useEffect, useState, useRef } from 'react'
+import { CheckSquare, Download, Edit2, ExternalLink, Loader2, Package, RefreshCw, Search, Square, Trash2, X, MessageSquare, ImagePlus } from 'lucide-react'
+import { batchDeleteItems, deleteItem, fetchAllItemsFromAccount, getItems, updateItem, updateItemMultiQuantityDelivery, updateItemMultiSpec, getItemDefaultReply, saveItemDefaultReply, deleteItemDefaultReply, batchSaveItemDefaultReply, batchDeleteItemDefaultReply, uploadItemDefaultReplyImage } from '@/api/items'
 import { getAccounts } from '@/api/accounts'
 import { useUIStore } from '@/store/uiStore'
 import { PageLoading } from '@/components/common/Loading'
@@ -24,6 +24,31 @@ export function Items() {
   const [editDetail, setEditDetail] = useState('')
   const [editSaving, setEditSaving] = useState(false)
 
+  // 商品默认回复弹窗状态
+  const [defaultReplyItem, setDefaultReplyItem] = useState<Item | null>(null)
+  const [defaultReplyContent, setDefaultReplyContent] = useState('')
+  const [defaultReplyImage, setDefaultReplyImage] = useState('')
+  const [defaultReplyEnabled, setDefaultReplyEnabled] = useState(true)
+  const [defaultReplyOnce, setDefaultReplyOnce] = useState(false)
+  const [loadingDefaultReply, setLoadingDefaultReply] = useState(false)
+  const [savingDefaultReply, setSavingDefaultReply] = useState(false)
+  const [defaultReplyImageUploading, setDefaultReplyImageUploading] = useState(false)
+  const defaultReplyImageInputRef = useRef<HTMLInputElement>(null)
+
+  // 批量默认回复弹窗状态
+  const [showBatchDefaultReplyModal, setShowBatchDefaultReplyModal] = useState(false)
+  const [batchReplyContent, setBatchReplyContent] = useState('')
+  const [batchReplyImage, setBatchReplyImage] = useState('')
+  const [batchReplyEnabled, setBatchReplyEnabled] = useState(true)
+  const [batchReplyOnce, setBatchReplyOnce] = useState(false)
+  const [savingBatchReply, setSavingBatchReply] = useState(false)
+  const [batchReplyImageUploading, setBatchReplyImageUploading] = useState(false)
+  const batchReplyImageInputRef = useRef<HTMLInputElement>(null)
+
+  // 删除确认状态
+  const [deleteDefaultReplyConfirm, setDeleteDefaultReplyConfirm] = useState(false)
+  const [batchDeleteDefaultReplyConfirm, setBatchDeleteDefaultReplyConfirm] = useState(false)
+
   const loadItems = async () => {
     if (!_hasHydrated || !isAuthenticated || !token) {
       return
@@ -41,6 +66,7 @@ export function Items() {
     }
   }
 
+
   const handleFetchItems = async () => {
     if (!selectedAccount) {
       addToast({ type: 'warning', message: '请先选择账号后再获取商品' })
@@ -50,7 +76,6 @@ export function Items() {
     setFetching(true)
 
     try {
-      // 使用获取所有页的接口，后端会自动遍历所有页
       const result = await fetchAllItemsFromAccount(selectedAccount)
 
       if (result.success) {
@@ -130,7 +155,6 @@ export function Items() {
     }
     if (!confirm(`确定要删除选中的 ${selectedIds.size} 个商品吗？`)) return
     try {
-      // 将选中的 ID 转换为 { cookie_id, item_id } 格式
       const itemsToDelete = items
         .filter((item) => selectedIds.has(item.id))
         .map((item) => ({ cookie_id: item.cookie_id, item_id: item.item_id }))
@@ -191,6 +215,211 @@ export function Items() {
     }
   }
 
+
+  // 打开默认回复配置弹窗
+  const handleOpenDefaultReply = async (item: Item) => {
+    setDefaultReplyItem(item)
+    setDefaultReplyImage('')
+    setLoadingDefaultReply(true)
+    
+    try {
+      const result = await getItemDefaultReply(item.cookie_id, item.item_id)
+      if (result.success && result.data) {
+        setDefaultReplyContent(result.data.reply_content || '')
+        setDefaultReplyImage(result.data.reply_image || '')
+        setDefaultReplyEnabled(result.data.enabled ?? true)
+        setDefaultReplyOnce(result.data.reply_once ?? false)
+      } else {
+        setDefaultReplyContent('')
+        setDefaultReplyImage('')
+        setDefaultReplyEnabled(true)
+        setDefaultReplyOnce(false)
+      }
+    } catch {
+      setDefaultReplyContent('')
+      setDefaultReplyImage('')
+      setDefaultReplyEnabled(true)
+      setDefaultReplyOnce(false)
+    } finally {
+      setLoadingDefaultReply(false)
+    }
+  }
+
+  // 关闭默认回复配置弹窗
+  const closeDefaultReply = () => {
+    setDefaultReplyItem(null)
+    setDefaultReplyContent('')
+    setDefaultReplyImage('')
+    setDefaultReplyEnabled(true)
+    setDefaultReplyOnce(false)
+    setDeleteDefaultReplyConfirm(false)
+  }
+
+  // 保存默认回复配置
+  const handleSaveDefaultReply = async () => {
+    if (!defaultReplyItem) return
+    setSavingDefaultReply(true)
+    
+    try {
+      await saveItemDefaultReply(defaultReplyItem.cookie_id, defaultReplyItem.item_id, {
+        reply_content: defaultReplyContent,
+        reply_image_url: defaultReplyImage,
+        enabled: defaultReplyEnabled,
+        reply_once: defaultReplyOnce
+      })
+      addToast({ type: 'success', message: '商品默认回复保存成功' })
+      closeDefaultReply()
+    } catch {
+      addToast({ type: 'error', message: '保存失败' })
+    } finally {
+      setSavingDefaultReply(false)
+    }
+  }
+
+  // 删除默认回复配置
+  const handleDeleteDefaultReply = async () => {
+    if (!defaultReplyItem) return
+    
+    try {
+      await deleteItemDefaultReply(defaultReplyItem.cookie_id, defaultReplyItem.item_id)
+      addToast({ type: 'success', message: '商品默认回复已删除' })
+      closeDefaultReply()
+    } catch {
+      addToast({ type: 'error', message: '删除失败' })
+    }
+  }
+
+  // 上传默认回复图片
+  const handleDefaultReplyImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !defaultReplyItem) return
+    
+    setDefaultReplyImageUploading(true)
+    try {
+      const result = await uploadItemDefaultReplyImage(defaultReplyItem.cookie_id, defaultReplyItem.item_id, file)
+      if (result.success && result.image_url) {
+        setDefaultReplyImage(result.image_url)
+        addToast({ type: 'success', message: '图片上传成功' })
+      } else {
+        addToast({ type: 'error', message: result.message || '图片上传失败' })
+      }
+    } catch {
+      addToast({ type: 'error', message: '图片上传失败' })
+    } finally {
+      setDefaultReplyImageUploading(false)
+      if (defaultReplyImageInputRef.current) {
+        defaultReplyImageInputRef.current.value = ''
+      }
+    }
+  }
+
+  // 打开批量默认回复弹窗
+  const handleOpenBatchDefaultReply = () => {
+    if (selectedIds.size === 0) {
+      addToast({ type: 'warning', message: '请先选择商品' })
+      return
+    }
+    setBatchReplyContent('')
+    setBatchReplyImage('')
+    setBatchReplyEnabled(true)
+    setBatchReplyOnce(false)
+    setShowBatchDefaultReplyModal(true)
+  }
+
+  // 保存批量默认回复
+  const handleSaveBatchDefaultReply = async () => {
+    if (selectedIds.size === 0) return
+    
+    const selectedItems = items.filter((item) => selectedIds.has(item.id))
+    const cookieId = selectedItems[0]?.cookie_id
+    if (!cookieId) return
+    
+    // 检查是否所有选中的商品都属于同一个账号
+    const allSameCookie = selectedItems.every((item) => item.cookie_id === cookieId)
+    if (!allSameCookie) {
+      addToast({ type: 'error', message: '批量操作只能针对同一账号的商品' })
+      return
+    }
+    
+    setSavingBatchReply(true)
+    try {
+      const itemIds = selectedItems.map((item) => item.item_id)
+      await batchSaveItemDefaultReply(cookieId, {
+        item_ids: itemIds,
+        reply_content: batchReplyContent,
+        reply_image_url: batchReplyImage,
+        enabled: batchReplyEnabled,
+        reply_once: batchReplyOnce
+      })
+      addToast({ type: 'success', message: `批量保存成功，共 ${itemIds.length} 个商品` })
+      setShowBatchDefaultReplyModal(false)
+      setSelectedIds(new Set())
+    } catch {
+      addToast({ type: 'error', message: '批量保存失败' })
+    } finally {
+      setSavingBatchReply(false)
+    }
+  }
+
+  // 上传批量默认回复图片
+  const handleBatchReplyImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    
+    setBatchReplyImageUploading(true)
+    try {
+      // 使用通用图片上传接口
+      const formData = new FormData()
+      formData.append('image', file)
+      const response = await fetch('/upload-image', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      })
+      const result = await response.json()
+      if (result.image_url) {
+        setBatchReplyImage(result.image_url)
+        addToast({ type: 'success', message: '图片上传成功' })
+      } else {
+        addToast({ type: 'error', message: result.detail || result.message || '图片上传失败' })
+      }
+    } catch {
+      addToast({ type: 'error', message: '图片上传失败' })
+    } finally {
+      setBatchReplyImageUploading(false)
+      if (batchReplyImageInputRef.current) {
+        batchReplyImageInputRef.current.value = ''
+      }
+    }
+  }
+
+  // 批量删除默认回复
+  const handleBatchDeleteDefaultReply = async () => {
+    if (selectedIds.size === 0) return
+    
+    const selectedItems = items.filter((item) => selectedIds.has(item.id))
+    const cookieId = selectedItems[0]?.cookie_id
+    if (!cookieId) return
+    
+    const allSameCookie = selectedItems.every((item) => item.cookie_id === cookieId)
+    if (!allSameCookie) {
+      addToast({ type: 'error', message: '批量操作只能针对同一账号的商品' })
+      return
+    }
+    
+    try {
+      const itemIds = selectedItems.map((item) => item.item_id)
+      await batchDeleteItemDefaultReply(cookieId, itemIds)
+      addToast({ type: 'success', message: `批量删除成功，共 ${itemIds.length} 个商品` })
+      setBatchDeleteDefaultReplyConfirm(false)
+      setSelectedIds(new Set())
+    } catch {
+      addToast({ type: 'error', message: '批量删除失败' })
+    }
+  }
+
   const filteredItems = items.filter((item) => {
     if (!searchKeyword) return true
     const keyword = searchKeyword.toLowerCase()
@@ -207,6 +436,7 @@ export function Items() {
     return <PageLoading />
   }
 
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -217,10 +447,20 @@ export function Items() {
         </div>
         <div className="flex flex-wrap gap-2">
           {selectedIds.size > 0 && (
-            <button onClick={handleBatchDelete} className="btn-ios-danger">
-              <Trash2 className="w-4 h-4" />
-              删除选中 ({selectedIds.size})
-            </button>
+            <>
+              <button onClick={handleOpenBatchDefaultReply} className="btn-ios-secondary">
+                <MessageSquare className="w-4 h-4" />
+                批量默认回复
+              </button>
+              <button onClick={() => setBatchDeleteDefaultReplyConfirm(true)} className="btn-ios-secondary">
+                <Trash2 className="w-4 h-4" />
+                批量删除回复
+              </button>
+              <button onClick={handleBatchDelete} className="btn-ios-danger">
+                <Trash2 className="w-4 h-4" />
+                删除选中 ({selectedIds.size})
+              </button>
+            </>
           )}
           <button
             onClick={handleFetchItems}
@@ -292,7 +532,7 @@ export function Items() {
           <span className="badge-primary">{filteredItems.length} 个商品</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="table-ios min-w-[900px]">
+          <table className="table-ios min-w-[1000px]">
             <thead>
               <tr>
                 <th className="w-10 whitespace-nowrap">
@@ -406,6 +646,13 @@ export function Items() {
                     <td className="sticky right-0 bg-white dark:bg-slate-900">
                       <div className="flex gap-1">
                         <button
+                          onClick={() => handleOpenDefaultReply(item)}
+                          className="table-action-btn hover:!bg-green-50"
+                          title="默认回复"
+                        >
+                          <MessageSquare className="w-4 h-4 text-green-500" />
+                        </button>
+                        <button
                           onClick={() => handleEdit(item)}
                           className="table-action-btn hover:!bg-blue-50"
                           title="编辑"
@@ -428,6 +675,7 @@ export function Items() {
           </table>
         </div>
       </div>
+
 
       {/* 编辑弹窗 */}
       {editingItem && (
@@ -490,6 +738,318 @@ export function Items() {
                 ) : (
                   '保存'
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 商品默认回复配置弹窗 */}
+      {defaultReplyItem && (
+        <div className="modal-overlay">
+          <div className="modal-content max-w-lg">
+            <div className="modal-header">
+              <h2 className="modal-title">商品默认回复配置</h2>
+              <button onClick={closeDefaultReply} className="modal-close">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="modal-body space-y-4">
+              {loadingDefaultReply ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+                </div>
+              ) : (
+                <>
+                  <div className="input-group">
+                    <label className="input-label">商品信息</label>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                      <div>ID: {defaultReplyItem.item_id}</div>
+                      <div className="line-clamp-1">{defaultReplyItem.item_title || defaultReplyItem.title || '-'}</div>
+                    </div>
+                  </div>
+                  
+                  <div className="input-group">
+                    <label className="input-label flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={defaultReplyEnabled}
+                        onChange={(e) => setDefaultReplyEnabled(e.target.checked)}
+                        className="w-4 h-4 rounded border-gray-300"
+                      />
+                      启用商品默认回复
+                    </label>
+                  </div>
+                  
+                  <div className="input-group">
+                    <label className="input-label">回复内容</label>
+                    <textarea
+                      value={defaultReplyContent}
+                      onChange={(e) => setDefaultReplyContent(e.target.value)}
+                      className="input-ios h-24 resize-none"
+                      placeholder="输入默认回复内容，支持变量：{send_user_name}、{send_user_id}、{send_message}、{item_id}"
+                    />
+                  </div>
+                  
+                  <div className="input-group">
+                    <label className="input-label">回复图片</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={defaultReplyImage}
+                        onChange={(e) => setDefaultReplyImage(e.target.value)}
+                        className="input-ios flex-1"
+                        placeholder="图片URL（可选）"
+                      />
+                      <input
+                        type="file"
+                        ref={defaultReplyImageInputRef}
+                        onChange={handleDefaultReplyImageUpload}
+                        accept="image/*"
+                        className="hidden"
+                      />
+                      <button
+                        onClick={() => defaultReplyImageInputRef.current?.click()}
+                        disabled={defaultReplyImageUploading}
+                        className="btn-ios-secondary"
+                      >
+                        {defaultReplyImageUploading ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <ImagePlus className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                    {defaultReplyImage && (
+                      <div className="mt-2">
+                        <img src={defaultReplyImage} alt="预览" className="max-h-24 rounded" />
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="input-group">
+                    <label className="input-label flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={defaultReplyOnce}
+                        onChange={(e) => setDefaultReplyOnce(e.target.checked)}
+                        className="w-4 h-4 rounded border-gray-300"
+                      />
+                      只回复一次（同一用户只回复一次）
+                    </label>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="modal-footer">
+              {!deleteDefaultReplyConfirm ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteDefaultReplyConfirm(true)}
+                    className="btn-ios-danger mr-auto"
+                    disabled={loadingDefaultReply || savingDefaultReply}
+                  >
+                    删除
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeDefaultReply}
+                    className="btn-ios-secondary"
+                    disabled={savingDefaultReply}
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={handleSaveDefaultReply}
+                    className="btn-ios-primary"
+                    disabled={loadingDefaultReply || savingDefaultReply}
+                  >
+                    {savingDefaultReply ? (
+                      <span className="flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        保存中...
+                      </span>
+                    ) : (
+                      '保存'
+                    )}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="text-red-500 text-sm">确定要删除此商品的默认回复配置吗？</span>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteDefaultReplyConfirm(false)}
+                    className="btn-ios-secondary"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={handleDeleteDefaultReply}
+                    className="btn-ios-danger"
+                  >
+                    确认删除
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* 批量默认回复弹窗 */}
+      {showBatchDefaultReplyModal && (
+        <div className="modal-overlay">
+          <div className="modal-content max-w-lg">
+            <div className="modal-header">
+              <h2 className="modal-title">批量设置默认回复</h2>
+              <button onClick={() => setShowBatchDefaultReplyModal(false)} className="modal-close">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="modal-body space-y-4">
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                已选择 {selectedIds.size} 个商品
+              </div>
+              
+              <div className="input-group">
+                <label className="input-label flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={batchReplyEnabled}
+                    onChange={(e) => setBatchReplyEnabled(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300"
+                  />
+                  启用默认回复
+                </label>
+              </div>
+              
+              <div className="input-group">
+                <label className="input-label">回复内容</label>
+                <textarea
+                  value={batchReplyContent}
+                  onChange={(e) => setBatchReplyContent(e.target.value)}
+                  className="input-ios h-24 resize-none"
+                  placeholder="输入默认回复内容，支持变量：{send_user_name}、{send_user_id}、{send_message}、{item_id}"
+                />
+              </div>
+              
+              <div className="input-group">
+                <label className="input-label">回复图片（可选）</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={batchReplyImage}
+                    onChange={(e) => setBatchReplyImage(e.target.value)}
+                    className="input-ios flex-1"
+                    placeholder="图片URL，或点击上传按钮"
+                  />
+                  <input
+                    type="file"
+                    ref={batchReplyImageInputRef}
+                    onChange={handleBatchReplyImageUpload}
+                    accept="image/*"
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => batchReplyImageInputRef.current?.click()}
+                    disabled={batchReplyImageUploading}
+                    className="btn-ios-secondary"
+                    title="上传图片"
+                  >
+                    {batchReplyImageUploading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <ImagePlus className="w-4 h-4" />
+                    )}
+                  </button>
+                  {batchReplyImage && (
+                    <button
+                      onClick={() => setBatchReplyImage('')}
+                      className="btn-ios-secondary text-red-500"
+                      title="清除图片"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+                {batchReplyImage && (
+                  <div className="mt-2">
+                    <img src={batchReplyImage} alt="预览" className="max-h-24 rounded border" />
+                  </div>
+                )}
+              </div>
+              
+              <div className="input-group">
+                <label className="input-label flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={batchReplyOnce}
+                    onChange={(e) => setBatchReplyOnce(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300"
+                  />
+                  只回复一次
+                </label>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                onClick={() => setShowBatchDefaultReplyModal(false)}
+                className="btn-ios-secondary"
+                disabled={savingBatchReply}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSaveBatchDefaultReply}
+                className="btn-ios-primary"
+                disabled={savingBatchReply}
+              >
+                {savingBatchReply ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    保存中...
+                  </span>
+                ) : (
+                  '批量保存'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 批量删除默认回复确认弹窗 */}
+      {batchDeleteDefaultReplyConfirm && (
+        <div className="modal-overlay">
+          <div className="modal-content max-w-sm">
+            <div className="modal-header">
+              <h2 className="modal-title">确认删除</h2>
+              <button onClick={() => setBatchDeleteDefaultReplyConfirm(false)} className="modal-close">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="text-gray-600 dark:text-gray-400">
+                确定要删除选中的 {selectedIds.size} 个商品的默认回复配置吗？
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                onClick={() => setBatchDeleteDefaultReplyConfirm(false)}
+                className="btn-ios-secondary"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleBatchDeleteDefaultReply}
+                className="btn-ios-danger"
+              >
+                确认删除
               </button>
             </div>
           </div>

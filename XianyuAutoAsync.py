@@ -3089,7 +3089,9 @@ class XianyuLive:
             logger.error(f"调试消息结构时发生错误: {self._safe_str(e)}")
 
     async def get_default_reply(self, send_user_name: str, send_user_id: str, send_message: str, chat_id: str, item_id: str = None) -> dict:
-        """获取默认回复内容，支持指定商品回复、变量替换、只回复一次功能和图片发送
+        """获取默认回复内容，支持商品级别默认回复、变量替换、只回复一次功能和图片发送
+        
+        优先级：商品默认回复 > 账号默认回复
         
         Returns:
             dict: 包含 'text' (文字回复) 和 'image_url' (图片URL，可选) 的字典
@@ -3099,42 +3101,59 @@ class XianyuLive:
         try:
             from db_manager import db_manager
 
-            # 1. 优先检查指定商品回复
+            # 1. 优先检查商品级别默认回复
             if item_id:
-                item_reply = db_manager.get_item_reply(self.cookie_id, item_id)
-                if item_reply and item_reply.get('reply_content'):
-                    reply_content = item_reply['reply_content']
-                    logger.info(f"【{self.cookie_id}】使用指定商品回复: 商品ID={item_id}")
-
+                logger.info(f"【{self.cookie_id}】检查商品默认回复: item_id={item_id}")
+                item_default_reply = db_manager.get_item_default_reply(self.cookie_id, item_id)
+                logger.info(f"【{self.cookie_id}】商品默认回复查询结果: {item_default_reply}")
+                if item_default_reply and item_default_reply.get('enabled', False):
+                    reply_content = item_default_reply.get('reply_content', '')
+                    reply_image_url = item_default_reply.get('reply_image_url', '')
+                    
+                    # 如果文字和图片都为空，返回空回复标记
+                    if (not reply_content or reply_content.strip() == '') and (not reply_image_url or reply_image_url.strip() == ''):
+                        logger.info(f"【{self.cookie_id}】商品 {item_id} 默认回复内容和图片都为空，不进行回复")
+                        return "EMPTY_REPLY"
+                    
+                    # 检查"只回复一次"功能（商品级别）
+                    if item_default_reply.get('reply_once', False) and chat_id:
+                        if db_manager.has_default_reply_record(self.cookie_id, chat_id, item_id):
+                            logger.info(f"【{self.cookie_id}】商品 {item_id} 已对用户 {chat_id} 回复过，跳过（只回复一次）")
+                            return "ALREADY_REPLIED"
+                    
                     # 进行变量替换
-                    try:
-                        formatted_reply = reply_content.format(
-                            send_user_name=send_user_name,
-                            send_user_id=send_user_id,
-                            send_message=send_message,
-                            item_id=item_id
-                        )
-                        logger.info(f"【{self.cookie_id}】指定商品回复内容: {formatted_reply}")
-                        return {'text': formatted_reply, 'image_url': None}
-                    except Exception as format_error:
-                        logger.error(f"指定商品回复变量替换失败: {self._safe_str(format_error)}")
-                        # 如果变量替换失败，返回原始内容
-                        return {'text': reply_content, 'image_url': None}
-                else:
-                    logger.warning(f"【{self.cookie_id}】商品ID {item_id} 没有配置指定回复，使用默认回复")
+                    formatted_reply = ''
+                    if reply_content and reply_content.strip():
+                        try:
+                            formatted_reply = reply_content.format(
+                                send_user_name=send_user_name,
+                                send_user_id=send_user_id,
+                                send_message=send_message,
+                                item_id=item_id
+                            )
+                        except Exception as format_error:
+                            logger.error(f"商品默认回复变量替换失败: {self._safe_str(format_error)}")
+                            formatted_reply = reply_content
+                    
+                    # 如果开启了"只回复一次"功能，记录这次回复（商品级别）
+                    if item_default_reply.get('reply_once', False) and chat_id:
+                        db_manager.add_default_reply_record(self.cookie_id, chat_id, item_id)
+                        logger.info(f"【{self.cookie_id}】记录商品默认回复: item_id={item_id}, chat_id={chat_id}")
+                    
+                    logger.info(f"【{self.cookie_id}】使用商品默认回复: 商品ID={item_id}, 文字={formatted_reply}, 图片={reply_image_url}")
+                    return {'text': formatted_reply, 'image_url': reply_image_url if reply_image_url and reply_image_url.strip() else None}
 
-            # 2. 获取当前账号的默认回复设置
+            # 2. 获取账号级别的默认回复设置
             default_reply_settings = db_manager.get_default_reply(self.cookie_id)
 
             if not default_reply_settings or not default_reply_settings.get('enabled', False):
                 logger.warning(f"账号 {self.cookie_id} 未启用默认回复")
                 return None
 
-            # 检查"只回复一次"功能
+            # 检查"只回复一次"功能（账号级别）
             if default_reply_settings.get('reply_once', False) and chat_id:
-                # 检查是否已经回复过这个chat_id
-                if db_manager.has_default_reply_record(self.cookie_id, chat_id):
-                    logger.info(f"【{self.cookie_id}】chat_id {chat_id} 已使用过默认回复，跳过（只回复一次）")
+                if db_manager.has_default_reply_record(self.cookie_id, chat_id, None):
+                    logger.info(f"【{self.cookie_id}】chat_id {chat_id} 已使用过账号默认回复，跳过（只回复一次）")
                     return None
 
             reply_content = default_reply_settings.get('reply_content', '')
@@ -3143,33 +3162,29 @@ class XianyuLive:
             # 如果文字和图片都为空，返回空回复标记
             if (not reply_content or reply_content.strip() == '') and (not reply_image_url or reply_image_url.strip() == ''):
                 logger.info(f"账号 {self.cookie_id} 默认回复内容和图片都为空，不进行回复")
-                return "EMPTY_REPLY"  # 返回特殊标记表示不回复
+                return "EMPTY_REPLY"
 
             # 进行变量替换
-            try:
-                # 获取当前商品是否有设置自动回复
-                item_replay = db_manager.get_item_replay(item_id)
+            formatted_reply = ''
+            if reply_content and reply_content.strip():
+                try:
+                    formatted_reply = reply_content.format(
+                        send_user_name=send_user_name,
+                        send_user_id=send_user_id,
+                        send_message=send_message,
+                        item_id=item_id or ''
+                    )
+                except Exception as format_error:
+                    logger.error(f"账号默认回复变量替换失败: {self._safe_str(format_error)}")
+                    formatted_reply = reply_content
 
-                formatted_reply = reply_content.format(
-                    send_user_name=send_user_name,
-                    send_user_id=send_user_id,
-                    send_message=send_message
-                ) if reply_content else ''
+            # 如果开启了"只回复一次"功能，记录这次回复（账号级别）
+            if default_reply_settings.get('reply_once', False) and chat_id:
+                db_manager.add_default_reply_record(self.cookie_id, chat_id, None)
+                logger.info(f"【{self.cookie_id}】记录账号默认回复: chat_id={chat_id}")
 
-                if item_replay:
-                    formatted_reply = item_replay.get('reply_content', '')
-
-                # 如果开启了"只回复一次"功能，记录这次回复
-                if default_reply_settings.get('reply_once', False) and chat_id:
-                    db_manager.add_default_reply_record(self.cookie_id, chat_id)
-                    logger.info(f"【{self.cookie_id}】记录默认回复: chat_id={chat_id}")
-
-                logger.info(f"【{self.cookie_id}】使用默认回复: 文字={formatted_reply}, 图片={reply_image_url}")
-                return {'text': formatted_reply, 'image_url': reply_image_url if reply_image_url and reply_image_url.strip() else None}
-            except Exception as format_error:
-                logger.error(f"默认回复变量替换失败: {self._safe_str(format_error)}")
-                # 如果变量替换失败，返回原始内容
-                return {'text': reply_content, 'image_url': reply_image_url if reply_image_url and reply_image_url.strip() else None}
+            logger.info(f"【{self.cookie_id}】使用账号默认回复: 文字={formatted_reply}, 图片={reply_image_url}")
+            return {'text': formatted_reply, 'image_url': reply_image_url if reply_image_url and reply_image_url.strip() else None}
 
         except Exception as e:
             logger.error(f"获取默认回复失败: {self._safe_str(e)}")

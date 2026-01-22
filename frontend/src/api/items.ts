@@ -73,3 +73,63 @@ export const updateItemMultiQuantityDelivery = (cookieId: string, itemId: string
 export const updateItemMultiSpec = (cookieId: string, itemId: string, enabled: boolean): Promise<ApiResponse> => {
   return put(`/items/${cookieId}/${itemId}/multi-spec`, { is_multi_spec: enabled })
 }
+
+
+// ==================== 商品默认回复 ====================
+
+// 商品默认回复配置类型
+export interface ItemDefaultReplyConfig {
+  item_id: string
+  reply_content: string
+  reply_image: string
+  enabled: boolean
+  reply_once: boolean
+}
+
+// 获取商品默认回复配置
+export const getItemDefaultReply = (cookieId: string, itemId: string): Promise<ApiResponse<ItemDefaultReplyConfig>> => {
+  return get(`/items/${cookieId}/${itemId}/default-reply`)
+}
+
+// 保存商品默认回复配置
+export const saveItemDefaultReply = (
+  cookieId: string,
+  itemId: string,
+  data: { reply_content: string; reply_image_url?: string; enabled: boolean; reply_once: boolean }
+): Promise<ApiResponse> => {
+  return put(`/items/${cookieId}/${itemId}/default-reply`, data)
+}
+
+// 上传商品默认回复图片
+export const uploadItemDefaultReplyImage = async (
+  cookieId: string,
+  itemId: string,
+  image: File
+): Promise<{ success: boolean; image_url?: string; message?: string }> => {
+  const formData = new FormData()
+  formData.append('image', image)
+  return post(`/items/${cookieId}/${itemId}/default-reply/upload-image`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+
+// 删除商品默认回复配置
+export const deleteItemDefaultReply = (cookieId: string, itemId: string): Promise<ApiResponse> => {
+  return del(`/items/${cookieId}/${itemId}/default-reply`)
+}
+
+// 批量保存商品默认回复配置
+export const batchSaveItemDefaultReply = (
+  cookieId: string,
+  data: { item_ids: string[]; reply_content: string; reply_image_url?: string; enabled: boolean; reply_once: boolean }
+): Promise<ApiResponse> => {
+  return post(`/items/${cookieId}/batch-default-reply`, data)
+}
+
+// 批量删除商品默认回复配置
+export const batchDeleteItemDefaultReply = (
+  cookieId: string,
+  itemIds: string[]
+): Promise<ApiResponse> => {
+  return post(`/items/${cookieId}/batch-delete-default-reply`, { item_ids: itemIds })
+}
