@@ -5185,6 +5185,28 @@ class DBManager:
 
                 for row in cursor.fetchall():
                     log_info = dict(zip(columns, row))
+                    # 将UTC时间转换为本地时间字符串
+                    if log_info.get('created_at'):
+                        try:
+                            from datetime import datetime
+                            # SQLite CURRENT_TIMESTAMP 返回的是UTC时间
+                            utc_time = datetime.strptime(log_info['created_at'], '%Y-%m-%d %H:%M:%S')
+                            # 转换为本地时间
+                            local_time = utc_time.replace(tzinfo=None)
+                            # 加上8小时时差（UTC+8）
+                            from datetime import timedelta
+                            local_time = utc_time + timedelta(hours=8)
+                            log_info['created_at'] = local_time.strftime('%Y-%m-%d %H:%M:%S')
+                        except Exception:
+                            pass  # 保持原值
+                    if log_info.get('updated_at'):
+                        try:
+                            from datetime import datetime, timedelta
+                            utc_time = datetime.strptime(log_info['updated_at'], '%Y-%m-%d %H:%M:%S')
+                            local_time = utc_time + timedelta(hours=8)
+                            log_info['updated_at'] = local_time.strftime('%Y-%m-%d %H:%M:%S')
+                        except Exception:
+                            pass  # 保持原值
                     logs.append(log_info)
 
                 return logs
