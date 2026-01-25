@@ -1750,14 +1750,21 @@ class XianyuSliderStealth:
                 ".nc_scale",
                 ".nc_1_n1t",
                 "[class*='track']",
-                "[class*='scale']"
+                "[class*='scale']",
+                # 新增更多可能的选择器
+                ".nc-lang-cnt",
+                "[id*='nc_'][id*='n1t']",
+                ".nc_wrapper",
+                "[class*='nc_']",
+                "span[class*='nc']",
+                "div[class*='nc']"
             ]
             
             # 查找滑块轨道（在找到按钮的同一个frame中查找，因为按钮和轨道应该在同一个位置）
             slider_track = None
             # 使用找到按钮的frame来查找轨道
             track_search_frame = found_frame if found_frame and found_frame != self.page else self.page
-            
+
             for selector in track_selectors:
                 try:
                     element = None
@@ -1767,18 +1774,26 @@ class XianyuSliderStealth:
                     else:
                         # 正常模式：使用 wait_for_selector
                         if track_search_frame == self.page:
-                            element = self.page.wait_for_selector(selector, timeout=3000)
+                            try:
+                                element = self.page.wait_for_selector(selector, timeout=3000)
+                            except:
+                                # 如果wait_for_selector超时，尝试直接query_selector
+                                element = track_search_frame.query_selector(selector)
                         else:
                             # 在frame中使用query_selector
                             element = track_search_frame.query_selector(selector)
-                    
+
                     if element:
+                        # 放宽可见性检查 - 只要元素存在就尝试使用
                         try:
-                            if not element.is_visible():
-                                element = None
+                            is_visible = element.is_visible()
+                            if not is_visible:
+                                logger.debug(f"【{self.pure_user_id}】找到轨道元素但不可见: {selector}，仍然尝试使用")
+                                # 不再丢弃不可见的元素，继续使用
                         except:
+                            logger.debug(f"【{self.pure_user_id}】无法检查轨道可见性: {selector}，继续使用")
                             pass
-                    
+
                     if element:
                         frame_info = "主页面" if track_search_frame == self.page else f"Frame"
                         logger.info(f"【{self.pure_user_id}】在{frame_info}找到滑块轨道: {selector}")
@@ -1798,14 +1813,14 @@ class XianyuSliderStealth:
                         try:
                             slider_container.click(timeout=1000)
                             logger.info(f"【{self.pure_user_id}】已点击滑块容器以激活frame")
-                            time.sleep(0.3)  # 等待轨道出现
+                            time.sleep(0.5)  # 增加等待时间：0.3 -> 0.5秒
                         except:
                             pass
                     elif slider_button:
                         try:
                             slider_button.click(timeout=1000)
                             logger.info(f"【{self.pure_user_id}】已点击滑块按钮以激活frame")
-                            time.sleep(0.3)  # 等待轨道出现
+                            time.sleep(0.5)  # 增加等待时间：0.3 -> 0.5秒
                         except:
                             pass
                     
@@ -1869,8 +1884,14 @@ class XianyuSliderStealth:
                         continue
             
             if not slider_track:
-                logger.error(f"【{self.pure_user_id}】未找到任何滑块轨道（主页面和所有frame都已检查）")
-                return slider_container, slider_button, None
+                logger.warning(f"【{self.pure_user_id}】未找到任何滑块轨道（主页面和所有frame都已检查）")
+                # 🔑 关键修复：如果找不到轨道，尝试使用容器作为轨道
+                if slider_container:
+                    logger.warning(f"【{self.pure_user_id}】尝试使用滑块容器作为轨道元素")
+                    slider_track = slider_container
+                else:
+                    logger.error(f"【{self.pure_user_id}】容器也不存在，无法继续")
+                    return slider_container, slider_button, None
             
             # 保存找到滑块的frame引用，供后续验证使用
             if found_frame and found_frame != self.page:

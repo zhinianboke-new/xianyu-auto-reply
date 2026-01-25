@@ -1384,7 +1384,10 @@ def get_cookies_details(current_user: Dict[str, Any] = Depends(get_current_user)
             'enabled': cookie_enabled,
             'auto_confirm': auto_confirm,
             'remark': remark,
-            'pause_duration': cookie_details.get('pause_duration', 10) if cookie_details else 10
+            'pause_duration': cookie_details.get('pause_duration', 10) if cookie_details else 10,
+            'username': cookie_details.get('username', '') if cookie_details else '',
+            'login_password': cookie_details.get('password', '') if cookie_details else '',
+            'show_browser': cookie_details.get('show_browser', False) if cookie_details else False
         })
     return result
 
