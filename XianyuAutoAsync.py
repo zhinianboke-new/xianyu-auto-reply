@@ -7407,7 +7407,13 @@ class XianyuLive:
                         # 提取用户ID
                         try:
                             message_1 = message.get("1")
-                            if isinstance(message_1, str) and '@' in message_1:
+                            message_4 = message.get("4")
+                            
+                            # 优先从message['4']提取（新格式）
+                            if isinstance(message_4, dict) and "senderUserId" in message_4:
+                                temp_user_id = message_4.get("senderUserId", "unknown_user")
+                            # 从message['1']提取（旧格式）
+                            elif isinstance(message_1, str) and '@' in message_1:
                                 temp_user_id = message_1.split('@')[0]
                             elif isinstance(message_1, dict):
                                 # 从字典中提取用户ID
@@ -7422,7 +7428,16 @@ class XianyuLive:
 
                         # 提取商品ID
                         try:
-                            if "1" in message and isinstance(message["1"], dict) and "10" in message["1"] and isinstance(message["1"]["10"], dict):
+                            message_4 = message.get("4")
+                            
+                            # 优先从message['4']['reminderUrl']提取（新格式）
+                            if isinstance(message_4, dict) and "reminderUrl" in message_4:
+                                url_info = message_4.get("reminderUrl", "")
+                                if isinstance(url_info, str) and "itemId=" in url_info:
+                                    temp_item_id = url_info.split("itemId=")[1].split("&")[0]
+                            
+                            # 从message['1']['10']提取（旧格式）
+                            if not temp_item_id and "1" in message and isinstance(message["1"], dict) and "10" in message["1"] and isinstance(message["1"]["10"], dict):
                                 url_info = message["1"]["10"].get("reminderUrl", "")
                                 if isinstance(url_info, str) and "itemId=" in url_info:
                                     temp_item_id = url_info.split("itemId=")[1].split("&")[0]
@@ -7450,7 +7465,13 @@ class XianyuLive:
             user_id = None
             try:
                 message_1 = message.get("1")
-                if isinstance(message_1, str) and '@' in message_1:
+                message_4 = message.get("4")
+                
+                # 优先从message['4']提取（新格式）
+                if isinstance(message_4, dict) and "senderUserId" in message_4:
+                    user_id = message_4.get("senderUserId", "unknown_user")
+                # 从message['1']提取（旧格式）
+                elif isinstance(message_1, str) and '@' in message_1:
                     user_id = message_1.split('@')[0]
                 elif isinstance(message_1, dict):
                     # 如果message['1']是字典，从message["1"]["10"]["senderUserId"]中提取user_id
@@ -7469,7 +7490,16 @@ class XianyuLive:
             # 安全地提取商品ID
             item_id = None
             try:
-                if "1" in message and isinstance(message["1"], dict) and "10" in message["1"] and isinstance(message["1"]["10"], dict):
+                message_4 = message.get("4")
+                
+                # 优先从message['4']['reminderUrl']提取（新格式）
+                if isinstance(message_4, dict) and "reminderUrl" in message_4:
+                    url_info = message_4.get("reminderUrl", "")
+                    if isinstance(url_info, str) and "itemId=" in url_info:
+                        item_id = url_info.split("itemId=")[1].split("&")[0]
+                
+                # 从message['1']['10']提取（旧格式）
+                if not item_id and "1" in message and isinstance(message["1"], dict) and "10" in message["1"] and isinstance(message["1"]["10"], dict):
                     url_info = message["1"]["10"].get("reminderUrl", "")
                     if isinstance(url_info, str) and "itemId=" in url_info:
                         item_id = url_info.split("itemId=")[1].split("&")[0]
@@ -7490,11 +7520,56 @@ class XianyuLive:
                 logger.info(message)
                 msg_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
-                # 安全地检查订单状态
+                # 安全地检查订单状态 - 支持message['3']和message['4']两种结构
                 red_reminder = None
+                reminder_content = None
+                message_4 = None
+                
+                # 检查message['3']结构（旧格式）
                 if isinstance(message, dict) and "3" in message and isinstance(message["3"], dict):
                     red_reminder = message["3"].get("redReminder")
+                
+                # 检查message['4']结构（新格式）
+                if isinstance(message, dict) and "4" in message and isinstance(message["4"], dict):
+                    message_4 = message["4"]
+                    if not red_reminder:
+                        red_reminder = message_4.get("redReminder")
+                    reminder_content = message_4.get("reminderContent")
 
+                # 【优先处理】检查message['4']中的reminderContent是否触发自动发货
+                # 必须在redReminder检查之前，因为两个字段可能有冲突
+                if message_4 and reminder_content and self._is_auto_delivery_trigger(reminder_content):
+                    logger.info(f'[{msg_time}] 【{self.cookie_id}】检测到message[4]自动发货触发消息: {reminder_content}')
+                    
+                    # 使用前面已经提取好的user_id和item_id
+                    send_user_id = user_id if user_id else message_4.get("senderUserId", "unknown")
+                    send_user_name = message_4.get("reminderTitle", "未知用户")
+                    
+                    # 提取chat_id
+                    chat_id = None
+                    if "2" in message:
+                        chat_id_raw = message["2"]
+                        chat_id = chat_id_raw.split('@')[0] if '@' in str(chat_id_raw) else str(chat_id_raw)
+                    
+                    if not chat_id:
+                        chat_id = f"auto_{send_user_id}_{int(time.time())}"
+                    
+                    # 使用已提取的item_id，如果没有则尝试从message_4提取
+                    final_item_id = item_id if item_id and not item_id.startswith("auto_") else None
+                    if not final_item_id and "reminderUrl" in message_4:
+                        url_info = message_4.get("reminderUrl", "")
+                        if isinstance(url_info, str) and "itemId=" in url_info:
+                            final_item_id = url_info.split("itemId=")[1].split("&")[0]
+                    
+                    if not final_item_id:
+                        final_item_id = item_id  # 使用默认值
+                    
+                    # 调用自动发货处理
+                    await self._handle_auto_delivery(websocket, message, send_user_name, send_user_id,
+                                                   final_item_id, chat_id, msg_time)
+                    return
+
+                # 处理其他redReminder状态
                 if red_reminder == '等待买家付款':
                     user_url = f'https://www.goofish.com/personal?userId={user_id}'
                     logger.info(f'[{msg_time}] 【系统】等待买家 {user_url} 付款')
@@ -7507,6 +7582,7 @@ class XianyuLive:
                     user_url = f'https://www.goofish.com/personal?userId={user_id}'
                     logger.info(f'[{msg_time}] 【系统】交易成功 {user_url} 等待卖家发货')
                     # return
+                    
             except:
                 pass
 
