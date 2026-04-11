@@ -3502,7 +3502,18 @@ class XianyuLive:
             # 过滤系统默认消息，不发送通知
             system_messages = [
                 '发来一条消息',
-                '发来一条新消息'
+                '发来一条新消息',
+                '[我已拍下，待付款]',
+                '[你关闭了订单，钱款已原路退返]',
+                '[买家确认收货，交易成功]',
+                '快给ta一个评价吧~',
+                '快给ta一个评价吧～',
+                '卖家人不错？送Ta闲鱼小红花',
+                '[你已确认收货，交易成功]',
+                '[你已发货]',
+                '[卡片消息]',
+                '[我完成了评价]',
+                '[禁止未成年购买网游类商品！]'
             ]
 
             if send_message in system_messages:
@@ -7723,6 +7734,9 @@ class XianyuLive:
                 return
             elif send_message == '已发货':
                 logger.info(f'[{msg_time}] 【{self.cookie_id}】发货确认消息不处理')
+                return
+            elif send_message == '[禁止未成年购买网游类商品！]':
+                logger.info(f'[{msg_time}] 【{self.cookie_id}】提醒消息不处理')
                 return
             # 【重要】检查是否为自动发货触发消息 - 即使在人工接入暂停期间也要处理
             elif self._is_auto_delivery_trigger(send_message):
