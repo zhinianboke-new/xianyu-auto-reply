@@ -5,4 +5,4 @@
 
 | 微信群 | 微信群1 | QQ群 |
 |:---:|:---:|:---:|
-| ![微信群](static/wechat-group.png) | ![微信群1](static/wechat-group1.png) | ![QQ群](static/qq-group.png) |
+| ![微信群](https://github.com/zhinianboke/xianyu-auto-reply/raw/main/static/wechat-group.png) | ![微信群1](https://github.com/zhinianboke/xianyu-auto-reply/raw/main/static/wechat-group1.png) | ![QQ群](https://github.com/zhinianboke/xianyu-auto-reply/raw/main/static/qq-group.png) |
